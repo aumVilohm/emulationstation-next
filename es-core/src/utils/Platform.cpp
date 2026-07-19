@@ -479,6 +479,13 @@ namespace Utils
 				}
 			}
 
+#if defined(BATTERYPLUS)
+			if (Utils::FileSystem::exists("/tmp/battery.percent"))
+			{
+				batteryCapacityPath = "/tmp/battery.percent";
+			}
+#endif
+
 			if ((batteryStatusPath.length() <= 1) && (batteryCurrChargePath.length() <= 1))
 			{
 				ret.hasBattery = false;
