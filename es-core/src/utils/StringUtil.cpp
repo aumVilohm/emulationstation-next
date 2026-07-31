@@ -423,6 +423,26 @@ namespace Utils
 
 		} // trim
 
+		std::string shellQuote(const std::string& _string)
+		{
+			// Wrap the value in single quotes so it reaches the command as one
+			// literal argument. Inside single quotes the shell expands nothing,
+			// so $, `, \, " and whitespace survive untouched; a single quote
+			// itself has to leave the quoted run, be escaped, and re-enter it.
+			std::string quoted = "'";
+
+			for (auto character : _string)
+			{
+				if (character == '\'')
+					quoted += "'\\''";
+				else
+					quoted += character;
+			}
+
+			return quoted + "'";
+
+		} // shellQuote
+
 		std::string replace(const std::string& _string, const std::string& _replace, const std::string& _with)
 		{
 			if (_replace.empty())
