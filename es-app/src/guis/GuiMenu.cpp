@@ -2061,8 +2061,12 @@ void GuiMenu::openSystemSettings()
 		optionsGpuSpeed->add(_("DISABLED"),"0", selectedGpuSpeed == "0");
 		optionsGpuSpeed->add(_("650 MHZ"),"650", selectedGpuSpeed == "650");
 		optionsGpuSpeed->add(_("700 MHZ"),"700", selectedGpuSpeed == "700");
+		optionsGpuSpeed->add(_("725 MHZ"),"725", selectedGpuSpeed == "725");
 		optionsGpuSpeed->add(_("750 MHZ"),"750", selectedGpuSpeed == "750");
 		optionsGpuSpeed->add(_("800 MHZ"),"800", selectedGpuSpeed == "800");
+		optionsGpuSpeed->add(_("855 MHZ"),"855", selectedGpuSpeed == "855");
+		optionsGpuSpeed->add(_("905 MHZ"),"905", selectedGpuSpeed == "905");
+		optionsGpuSpeed->add(_("925 MHZ"),"925", selectedGpuSpeed == "925");
 		s->addWithLabel(_("GPU OVERCLOCK SPEED"), optionsGpuSpeed);
 		s->addSaveFunc([this, optionsGpuSpeed, selectedGpuSpeed]
 		{
