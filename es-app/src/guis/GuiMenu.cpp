@@ -2230,6 +2230,26 @@ void GuiMenu::openSystemSettings()
 	});
 #endif
 
+#if defined(BATTERYPLUS)
+	// Allow user control over battery capacity etimates
+	s->addGroup(_("BATTERY"));
+	auto optionsEnableBatteryplus = std::make_shared<SwitchComponent>(mWindow);
+	std::string batteryplusHelpText = _("Enable batteryplus voltage-based capacity estimates.");
+	s->addWithDescription(_("ENABLE BATTERYPLUS"), batteryplusHelpText, optionsEnableBatteryplus);
+	
+	bool batteryplusEnabled = SystemConf::getInstance()->get("system.batteryplus.enabled") == "1";
+	optionsEnableBatteryplus->setState(batteryplusEnabled);
+
+	s->addSaveFunc([this, optionsEnableBatteryplus, batteryplusEnabled, s]
+	{
+		if(optionsEnableBatteryplus->changed()) {
+			SystemConf::getInstance()->set("system.batteryplus.enabled", optionsEnableBatteryplus->getState() ? "1" : "0");
+			SystemConf::getInstance()->saveSystemConf();
+			s->setVariable("exitreboot", true);
+		}
+	});
+#endif
+
 #ifdef BATOCERA
 	// video device
 	std::vector<std::string> availableVideo = ApiSystem::getInstance()->getAvailableVideoOutputDevices();
