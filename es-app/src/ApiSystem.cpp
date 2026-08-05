@@ -445,19 +445,19 @@ bool ApiSystem::enableWifi(std::string ssid, std::string key, std::string countr
 	if (!ret)
 		return ret;
 	
-	return executeScript("wifictl connect \"" + ssid + "\" \"" + key + "\" \"" + country + "\"");
+	// executeScript() runs the command through a shell, so the SSID and the
+	// passphrase have to be quoted as literals. Double quotes are not enough:
+	// they still let the shell expand $, ` and \, which silently corrupts any
+	// passphrase containing them (and lets a crafted SSID run commands).
+	return executeScript("wifictl connect " + Utils::String::shellQuote(ssid) +
+			     " " + Utils::String::shellQuote(key) +
+			     " " + Utils::String::shellQuote(country));
 }
 #else
-bool ApiSystem::enableWifi(std::string ssid, std::string key) 
+bool ApiSystem::enableWifi(std::string ssid, std::string key)
 {
-	// Escape single quote if it's in the passphrase
-	using std::regex;
-	using std::regex_replace;
-
-	regex tic("(')");
-	key = regex_replace(key,tic,"\\'");
-	ssid = regex_replace(ssid,tic,"\\'");
-	return executeScript("wifictl enable $\'" + ssid + "\' $\'" + key + "\'");
+	return executeScript("wifictl enable " + Utils::String::shellQuote(ssid) +
+			     " " + Utils::String::shellQuote(key));
 }
 #endif
 

@@ -20,6 +20,7 @@ namespace Utils
 		std::string  toLower            (const std::string& _string);
 		std::string  toUpper            (const std::string& _string);
 		std::string  trim               (const std::string& _string);
+		std::string  shellQuote         (const std::string& _string);
 		std::string  replace            (const std::string& _string, const std::string& _replace, const std::string& _with);
 		bool         startsWith         (const std::string& _string, const std::string& _start);
 		bool         endsWith           (const std::string& _string, const std::string& _end);
