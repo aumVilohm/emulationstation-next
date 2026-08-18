@@ -805,6 +805,19 @@ void GuiMenu::openDeveloperSettings()
 	
 	s->addSwitch(_("SHOW FRAMERATE"), _("Also turns on the emulator's native FPS counter, if available."), "DrawFramerate", true, nullptr);
 	s->addSwitch(_("VSYNC"), "VSync", true, [] { Renderer::setSwapInterval(); });
+	auto fpsLimit = std::make_shared<OptionListComponent<int>>(mWindow, _("FPS LIMIT"), false);
+	fpsLimit->add(_("NO"), 0, Settings::FpsLimit() == 0);
+	fpsLimit->add("25", 25, Settings::FpsLimit() == 25);
+	fpsLimit->add("30", 30, Settings::FpsLimit() == 30);
+	fpsLimit->add("50", 50, Settings::FpsLimit() == 50);
+	fpsLimit->add("60", 60, Settings::FpsLimit() == 60);
+	fpsLimit->add("75", 75, Settings::FpsLimit() == 75);
+	fpsLimit->add("90", 90, Settings::FpsLimit() == 90);
+	fpsLimit->add("100", 100, Settings::FpsLimit() == 100);
+	fpsLimit->add("120", 120, Settings::FpsLimit() == 120);
+	fpsLimit->add("144", 144, Settings::FpsLimit() == 144);
+	s->addWithLabel(_("FPS LIMIT"), fpsLimit);
+	s->addSaveFunc([fpsLimit] { Settings::setFpsLimit(fpsLimit->getSelected()); });
 
 #if defined(BATOCERA) || defined(ROCKNIX)
 	// overscan
@@ -1231,7 +1244,7 @@ void GuiMenu::openDeveloperSettings()
 	mWindow->pushGui(s);
 }
 
-void GuiMenu::openUpdatesSettings()
+void GuiMenu::openUpdatesSettings(bool selectTorrentService)
 {
 	GuiSettings *updateGui = new GuiSettings(mWindow, _("UPDATES & DOWNLOADS").c_str());
 
@@ -1308,6 +1321,73 @@ void GuiMenu::openUpdatesSettings()
 				mWindow->pushGui(new GuiUpdate(mWindow));
 			}
 		});
+
+		// Start manual update
+		if (ApiSystem::getInstance()->canLocalUpdate())
+		  {
+		    updateGui->addEntry(_("START LOCAL MEDIA UPDATE"), false, [this]
+		    {
+		      mWindow->pushGui(new GuiMsgBox(mWindow, _("REALLY UPDATE FROM LOCAL MEDIA?"),
+						     _("YES"), [this] { new ThreadedUpdater(mWindow, "LOCAL"); }, 
+						     _("NO"), nullptr));
+		    });
+		  }
+	}
+
+	if (ApiSystem::getInstance()->isScriptingSupported(ApiSystem::UPGRADEVIATORRENT))
+	{
+	  updateGui->addGroup(_("SOFTWARE UPDATES VIA TORRENT"));
+
+	  // server
+	  bool service_torrent_status = false;
+	  auto services = ApiSystem::getInstance()->getServices();
+	  for(unsigned int i = 0; i < services.size(); i++) {
+	    if(services[i].enabled && services[i].name == "batocera_torrent") {
+	      service_torrent_status = true;
+	    }
+	  }
+	  auto server_switch = std::make_shared<SwitchComponent>(mWindow);
+	  server_switch->setState(service_torrent_status);
+
+	  updateGui->addWithLabel(_("SHARE UPDATES VIA TORRENT"), server_switch, selectTorrentService);
+
+	  server_switch->setOnChangedCallback([this, updateGui, service_torrent_status, server_switch]()
+	  {
+	    bool service_torrent_btn_enabled = server_switch->getState();
+	    if (service_torrent_btn_enabled != service_torrent_status)
+	      {
+		if(service_torrent_btn_enabled) {
+		  ApiSystem::getInstance()->enableService("batocera_torrent", true);
+		  mWindow->displayNotificationMessage(_U("\uF011  ") + _("Torrent update service started"));
+		} else {
+		  ApiSystem::getInstance()->enableService("batocera_torrent", false);
+		  mWindow->displayNotificationMessage(_U("\uF011  ") + _("Torrent update service stopped"));
+		}
+
+		delete updateGui;
+		openUpdatesSettings(true);
+	      }
+	  });
+
+	  // menu in case the service is up
+	  if(service_torrent_status) {
+	    std::string torrent_status = ApiSystem::getInstance()->torrentStatus();
+
+	    if (ApiSystem::getInstance()->torrentIsReadyForUpdate())
+	      {
+		//updateGui->addEntry(_("START UPDATE FROM TORRENT FILE"), false, [this]
+		updateGui->addWithLabel(_("START UPDATE FROM TORRENT FILE"),
+					std::make_shared<TextComponent>(mWindow, torrent_status, ThemeData::getMenuTheme()->Text.font, ThemeData::getMenuTheme()->Text.color),
+					false, [this]		
+		{
+		  mWindow->pushGui(new GuiMsgBox(mWindow, _("REALLY UPDATE FROM TORRENT FILE ?"),
+						 _("YES"), [this] { new ThreadedUpdater(mWindow, "TORRENT"); }, 
+						 _("NO"), nullptr));
+		});
+	      } else {
+	        updateGui->addWithLabel(_("DOWNLOAD STATUS"), std::make_shared<TextComponent>(mWindow, torrent_status, ThemeData::getMenuTheme()->Text.font, ThemeData::getMenuTheme()->Text.color));
+	    }
+	  }
 	}
 
 	mWindow->pushGui(updateGui);
@@ -2475,7 +2555,7 @@ void GuiMenu::openSystemSettings()
 	{
 		// Retroachievements
 		if (ApiSystem::getInstance()->isScriptingSupported(ApiSystem::RETROACHIVEMENTS))
-			s->addEntry(_("RETROACHIEVEMENT SETTINGS"), true, [this] { openRetroachievementsSettings(); });
+			s->addEntry(_("RETROACHIEVEMENTS SETTINGS"), true, [this] { openRetroachievementsSettings(); });
 
 		if (SystemData::isNetplayActivated() && ApiSystem::getInstance()->isScriptingSupported(ApiSystem::NETPLAY))
 			s->addEntry(_("NETPLAY SETTINGS"), true, [this] { openNetplaySettings(); }, "iconNetplay");
@@ -2504,7 +2584,7 @@ void GuiMenu::openSystemSettings()
 	});
 #endif
 
-#if GAMEFORCE || RK3326
+#if GAMEFORCE
 	auto buttonColor_GameForce = std::make_shared< OptionListComponent<std::string> >(mWindow, _("BUTTON LED COLOR"));
 	buttonColor_GameForce->add(_("off"), "off", SystemConf::getInstance()->get("color_rgb") == "off" || SystemConf::getInstance()->get("color_rgb") == "");
 	buttonColor_GameForce->add(_("red"), "red", SystemConf::getInstance()->get("color_rgb") == "red");
@@ -2533,6 +2613,40 @@ void GuiMenu::openSystemSettings()
 		if (powerled_GameForce->changed()) {
 			ApiSystem::getInstance()->setPowerLedGameForce(powerled_GameForce->getSelected());
 			SystemConf::getInstance()->set("option_powerled", powerled_GameForce->getSelected());
+		}
+	});
+#endif
+
+#if RK3326
+	if (Utils::FileSystem::exists("/sys/class/leds/keros::ambient")) {
+		auto buttonColor_r36ultra = std::make_shared< OptionListComponent<std::string> >(mWindow, _("BUTTON LED COLOR"));
+		buttonColor_r36ultra->add(_("off"), "off", SystemConf::getInstance()->get("color_rgb") == "off" || SystemConf::getInstance()->get("color_rgb") == "");
+		buttonColor_r36ultra->add(_("red"), "red", SystemConf::getInstance()->get("color_rgb") == "red");
+		buttonColor_r36ultra->add(_("yellow"), "yellow", SystemConf::getInstance()->get("color_rgb") == "yellow");
+		buttonColor_r36ultra->add(_("green"), "green", SystemConf::getInstance()->get("color_rgb") == "green");
+		buttonColor_r36ultra->add(_("cyan"), "cyan", SystemConf::getInstance()->get("color_rgb") == "cyan");
+		buttonColor_r36ultra->add(_("blue"), "blue", SystemConf::getInstance()->get("color_rgb") == "blue");
+		buttonColor_r36ultra->add(_("purple"), "purple", SystemConf::getInstance()->get("color_rgb") == "purple");
+		buttonColor_r36ultra->add(_("white"), "white", SystemConf::getInstance()->get("color_rgb") == "white");		
+		s->addWithLabel(_("BUTTON LED COLOR"), buttonColor_r36ultra);
+		s->addSaveFunc([buttonColor_r36ultra] 
+		{
+			if (buttonColor_r36ultra->changed()) {
+				ApiSystem::getInstance()->setButtonColorR36Ultra(buttonColor_r36ultra->getSelected());
+				SystemConf::getInstance()->set("color_rgb", buttonColor_r36ultra->getSelected());
+			}
+		});
+	}
+
+	auto powerled_r36 = std::make_shared< OptionListComponent<std::string> >(mWindow, _("POWER LED COLOR"));
+	powerled_r36->add(_("on"), "on", SystemConf::getInstance()->get("option_powerled") == "on" || SystemConf::getInstance()->get("option_powerled") == "");
+	powerled_r36->add(_("off"), "off", SystemConf::getInstance()->get("option_powerled") == "off");
+	s->addWithLabel(_("POWER LED COLOR"), powerled_r36);
+	s->addSaveFunc([powerled_r36]
+	{
+		if (powerled_r36->changed()) {
+			ApiSystem::getInstance()->setPowerLedR36(powerled_r36->getSelected());
+			SystemConf::getInstance()->set("option_powerled", powerled_r36->getSelected());
 		}
 	});
 #endif
@@ -2614,8 +2728,23 @@ void GuiMenu::openSystemSettings()
 		led_enabled_switch->setState(isEnabled);
 		s->addWithLabel(_("ENABLE LED"), led_enabled_switch);
 		
-		// Only display RGB color sliders if the hardware is NOT monochrome
+		// Only display RGB color sliders and modes if the hardware is NOT monochrome
 		if (!ApiSystem::getInstance()->isLEDMonochrome()) {
+			// LED MODE Dropdown Component
+			std::string currentMode = SystemConf::getInstance()->get("led.mode");
+			if (currentMode.empty())
+				currentMode = "static";
+
+			auto ledMode = std::make_shared<OptionListComponent<std::string>>(mWindow, _("LED MODE"), false);
+			ledMode->addRange({
+				{ _("STATIC"), "static" },
+				{ _("RAINBOW"), "rainbow" },
+				{ _("CHROMA"), "chroma" },
+				{ _("PULSE"), "pulse" }
+			}, currentMode);
+			s->addWithLabel(_("LED MODE"), ledMode);
+
+			// RGB Configuration Colors
 			std::string colourString = SystemConf::getInstance()->get("led.colour");
 			if (colourString.empty())
 				colourString = "255 0 165";
@@ -2627,11 +2756,15 @@ void GuiMenu::openSystemSettings()
 			auto greenLEDComponent = std::make_shared<SliderComponent>(mWindow, 0.f, 255.f, 1.f);
 			auto blueLEDComponent = std::make_shared<SliderComponent>(mWindow, 0.f, 255.f, 1.f);
 
+			// Track if sliders were adjusted so we can revert mode back to static
+			auto sliderChanged = std::make_shared<bool>(false);
+
 			redLEDComponent->setValue(red);
-			redLEDComponent->setOnValueChanged([greenLEDComponent, blueLEDComponent](const float &newVal) {
+			redLEDComponent->setOnValueChanged([greenLEDComponent, blueLEDComponent, sliderChanged](const float &newVal) {
 				int redInt = static_cast<int>(newVal);
 				int greenInt = static_cast<int>(greenLEDComponent->getValue());
 				int blueInt = static_cast<int>(blueLEDComponent->getValue());
+				*sliderChanged = true;
 				ApiSystem::getInstance()->setLEDColours(redInt, greenInt, blueInt);
 				std::string colourString = std::to_string(redInt) + " " + std::to_string(greenInt) + " " + std::to_string(blueInt);
 				SystemConf::getInstance()->set("led.colour", colourString);
@@ -2639,10 +2772,11 @@ void GuiMenu::openSystemSettings()
 			s->addWithLabel(_("RED"), redLEDComponent);
 
 			greenLEDComponent->setValue(green);
-			greenLEDComponent->setOnValueChanged([redLEDComponent, blueLEDComponent](const float &newVal) {
+			greenLEDComponent->setOnValueChanged([redLEDComponent, blueLEDComponent, sliderChanged](const float &newVal) {
 				int redInt = static_cast<int>(redLEDComponent->getValue());
 				int greenInt = static_cast<int>(newVal);
 				int blueInt = static_cast<int>(blueLEDComponent->getValue());
+				*sliderChanged = true;
 				ApiSystem::getInstance()->setLEDColours(redInt, greenInt, blueInt);
 				std::string colourString = std::to_string(redInt) + " " + std::to_string(greenInt) + " " + std::to_string(blueInt);
 				SystemConf::getInstance()->set("led.colour", colourString);
@@ -2650,24 +2784,39 @@ void GuiMenu::openSystemSettings()
 			s->addWithLabel(_("GREEN"), greenLEDComponent);
 
 			blueLEDComponent->setValue(blue);
-			blueLEDComponent->setOnValueChanged([redLEDComponent, greenLEDComponent](const float &newVal) {
+			blueLEDComponent->setOnValueChanged([redLEDComponent, greenLEDComponent, sliderChanged](const float &newVal) {
 				int redInt = static_cast<int>(redLEDComponent->getValue());
 				int greenInt = static_cast<int>(greenLEDComponent->getValue());
 				int blueInt = static_cast<int>(newVal);
+				*sliderChanged = true;
 				ApiSystem::getInstance()->setLEDColours(redInt, greenInt, blueInt);
 				std::string colourString = std::to_string(redInt) + " " + std::to_string(greenInt) + " " + std::to_string(blueInt);
 				SystemConf::getInstance()->set("led.colour", colourString);
 			});
 			s->addWithLabel(_("BLUE"), blueLEDComponent);
+
+			s->addSaveFunc([led_enabled_switch, ledMode, sliderChanged] {
+				bool state = led_enabled_switch->getState();
+				if (state != (SystemConf::getInstance()->get("led.enabled") != "0")) {
+					ApiSystem::getInstance()->setLEDEnabled(state);
+				}
+
+				std::string newMode = ledMode->getSelected();
+				if (*sliderChanged) {
+					newMode = "static";
+				}
+				if (newMode != SystemConf::getInstance()->get("led.mode")) {
+					ApiSystem::getInstance()->setLEDMode(newMode);
+				}
+			});
+		} else {
+			s->addSaveFunc([led_enabled_switch] {
+				bool state = led_enabled_switch->getState();
+				if (state != (SystemConf::getInstance()->get("led.enabled") != "0")) {
+					ApiSystem::getInstance()->setLEDEnabled(state);
+				}
+			});
 		}
-
-		s->addSaveFunc([led_enabled_switch] {
-			bool state = led_enabled_switch->getState();
-			if (state != (SystemConf::getInstance()->get("led.enabled") != "0")) {
-				ApiSystem::getInstance()->setLEDEnabled(state);
-			}
-		});
-
 	}
 	
 	// LED brightness - Only display if the hardware is NOT monochrome
@@ -2792,7 +2941,16 @@ void GuiMenu::openSystemSettings()
 		auto rootpassword = std::make_shared<TextComponent>(mWindow, ApiSystem::getInstance()->getRootPassword(), ThemeData::getMenuTheme()->Text.font, ThemeData::getMenuTheme()->Text.color);
 		securityGui->addWithLabel(_("ROOT PASSWORD"), rootpassword);
 
-		securityGui->addSaveFunc([this, securityEnabled, s] 
+#ifdef BATOCERA
+		auto cpuMitigations = std::make_shared<SwitchComponent>(mWindow);
+		cpuMitigations->setState(ApiSystem::getInstance()->areCpuMitigationsEnabled());
+		securityGui->addWithDescription(
+			_("CPU SECURITY MITIGATIONS"),
+			_("Disabling mitigations may improve performance on some systems at the cost of reduced protection against certain CPU vulnerabilities."),
+			cpuMitigations);
+#endif
+
+		securityGui->addSaveFunc([this, securityEnabled, s]
 		{
 			Window* window = this->mWindow;
 
@@ -2803,6 +2961,18 @@ void GuiMenu::openSystemSettings()
 				s->setVariable("reboot", true);				
 			}
 		});
+
+#ifdef BATOCERA
+		securityGui->addSaveFunc([cpuMitigations, s]
+		{
+			if (cpuMitigations->changed())
+			{
+				if (ApiSystem::getInstance()->setCpuMitigationsEnabled(cpuMitigations->getState()))
+					s->setVariable("reboot", true);
+			}
+		});
+#endif
+
 		mWindow->pushGui(securityGui);
 	});
 #else
@@ -3646,7 +3816,7 @@ void GuiMenu::openGamesSettings()
 
 	// Retroachievements
 	if (ApiSystem::getInstance()->isScriptingSupported(ApiSystem::RETROACHIVEMENTS))
-		s->addEntry(_("RETROACHIEVEMENT SETTINGS"), true, [this] { openRetroachievementsSettings(); });
+		s->addEntry(_("RETROACHIEVEMENTS SETTINGS"), true, [this] { openRetroachievementsSettings(); });
 
 	// Netplay
 	if (SystemData::isNetplayActivated() && ApiSystem::getInstance()->isScriptingSupported(ApiSystem::NETPLAY))
@@ -5259,7 +5429,7 @@ void GuiMenu::openNetworkSettings(bool selectWifiEnable, bool selectAdhocEnable)
 	// Wifi enable
 	auto enable_wifi = std::make_shared<SwitchComponent>(mWindow);
 	enable_wifi->setState(baseWifiEnabled);
-	s->addWithLabel(_("ENABLE WIFI"), enable_wifi, selectWifiEnable);
+	s->addWithLabel(_("ENABLE WI-FI"), enable_wifi, selectWifiEnable);
 
 #ifdef RK3399
         // Add option to disable RG552 wifi gpio
@@ -5293,13 +5463,13 @@ void GuiMenu::openNetworkSettings(bool selectWifiEnable, bool selectAdhocEnable)
 	{
 		if (!baseAdhocEnabled)
 		{
-			s->addInputTextConfigRow(_("WIFI SSID"), "wifi.ssid", false, false, &openWifiSettings);
-			s->addInputTextConfigRow(_("WIFI KEY"), "wifi.key", true);
+			s->addInputTextConfigRow(_("WI-FI SSID"), "wifi.ssid", false, false, &openWifiSettings);
+			s->addInputTextConfigRow(_("WI-FI KEY"), "wifi.key", true);
 
 #if !WIN32
-		        // Batocera-specific WIFI COUNTRY option
+		        // Batocera-specific WI-FI COUNTRY option
 		        auto country_codes = getCountryCodes();
-		        auto country = std::make_shared<OptionListComponent<std::string>>(mWindow, _("WIFI COUNTRY"), false);
+		        auto country = std::make_shared<OptionListComponent<std::string>>(mWindow, _("WI-FI COUNTRY"), false);
 
 		        country->add(_("N/A"), "", baseCountry.empty());
 
@@ -5309,7 +5479,7 @@ void GuiMenu::openNetworkSettings(bool selectWifiEnable, bool selectAdhocEnable)
 		        if (country->getSelectedObjects().size() == 0)
 		            country->selectFirstItem();
 
-		        s->addWithLabel(_("WIFI COUNTRY"), country);
+		        s->addWithLabel(_("WI-FI COUNTRY"), country);
 		        s->addSaveFunc([country] { SystemConf::getInstance()->set("wifi.country", country->getSelected()); });
 #endif
 		}
@@ -5375,17 +5545,17 @@ void GuiMenu::openNetworkSettings(bool selectWifiEnable, bool selectAdhocEnable)
 			if (baseSSID != newSSID || baseKEY != newKey || baseCountry != newCountry || !baseWifiEnabled)
 			{
 				if (ApiSystem::getInstance()->enableWifi(newSSID, newKey, newCountry))
-					window->pushGui(new GuiMsgBox(window, _("WIFI ENABLED")));
+					window->pushGui(new GuiMsgBox(window, _("WI-FI ENABLED")));
 				else
-					window->pushGui(new GuiMsgBox(window, _("WIFI CONFIGURATION ERROR")));
+					window->pushGui(new GuiMsgBox(window, _("WI-FI CONFIGURATION ERROR")));
 			}
 #else
 			if (baseSSID != newSSID || baseKEY != newKey || !baseWifiEnabled)
 			{
 				if (ApiSystem::getInstance()->enableWifi(newSSID, newKey))
-					window->pushGui(new GuiMsgBox(window, _("WIFI ENABLED")));
+					window->pushGui(new GuiMsgBox(window, _("WI-FI ENABLED")));
 				else
-					window->pushGui(new GuiMsgBox(window, _("WIFI CONFIGURATION ERROR")));
+					window->pushGui(new GuiMsgBox(window, _("WI-FI CONFIGURATION ERROR")));
 			}
 #endif
 		}
@@ -5844,7 +6014,7 @@ void GuiMenu::createDecorationItemTemplate(Window* window, std::vector<Decoratio
 
 	// spacer between icon and text
 	auto spacer = std::make_shared<GuiComponent>(window);
-	spacer->setSize(IMGPADDING, 0);
+	spacer->setSize(IMGPADDING, maxSize.y());
 	row.addElement(spacer, false);
 
 	std::string label = data;

@@ -287,7 +287,7 @@ void GuiScraperStart::loadSettingsPage()
 		addSwitch(_("VIDEO"), "ScrapeVideos", true);
 
 	if (scrap->isMediaSupported(Scraper::ScraperMediaSource::FanArt))
-		addSwitch(_("FANART"), "ScrapeFanart", true);
+		addSwitch(_("FAN ART"), "ScrapeFanart", true);
 
 	if (scrap->isMediaSupported(Scraper::ScraperMediaSource::BoxBack))
 		addSwitch(_("BOX BACKSIDE"), "ScrapeBoxBack", true);

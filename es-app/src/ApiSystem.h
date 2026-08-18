@@ -173,6 +173,7 @@ public:
 		WRITEPLANEMODE = 30,
 		BACKGLASS = 31,
 		NFC = 32,
+		UPGRADEVIATORRENT = 33,
 	};
 
 	virtual bool isScriptingSupported(ScriptId script);
@@ -197,7 +198,12 @@ public:
 
     bool setOverclock(std::string mode);
 
-    virtual std::pair<std::string, int> updateSystem(const std::function<void(const std::string)>& func = nullptr);
+#ifdef BATOCERA
+    bool areCpuMitigationsEnabled();
+    bool setCpuMitigationsEnabled(bool enabled);
+#endif
+
+    virtual std::pair<std::string, int> updateSystem(const std::function<void(const std::string)>& func = nullptr, bool fromlocalmedia = false);
 
     std::pair<std::string, int> backupSystem(BusyComponent* ui, std::string device);
     std::pair<std::string, int> installSystem(BusyComponent* ui, std::string device, std::string architecture);
@@ -205,8 +211,13 @@ public:
 
     virtual bool ping();
     virtual bool canUpdate(std::vector<std::string>& output);
+    virtual bool canLocalUpdate(); // update from a local media
 	virtual void setReadyFlag(bool ready = true);
 	virtual bool isReadyFlagSet();
+
+    virtual bool torrentIsReadyForUpdate();
+    virtual std::string torrentStatus();
+    virtual std::pair<std::string, int> torrentUpdateSystem(const std::function<void(const std::string)>& func = nullptr);
 
     virtual bool launchKodi(Window *window);
     bool launchFileManager(Window *window);
@@ -254,8 +265,6 @@ public:
 	virtual std::vector<std::string> getPairedBluetoothDeviceList();	
     virtual bool scanNewBluetooth(const std::function<void(const std::string)>& func = nullptr); // Obsolete
 
-	virtual int GetTotalRam();
-
     std::vector<std::string> getAvailableBackupDevices();
     std::vector<std::string> getAvailableInstallDevices();
     std::vector<std::string> getAvailableInstallArchitectures();
@@ -277,6 +286,10 @@ public:
 	bool setButtonColorGameForce(std::string basic_string);
 
 	bool setPowerLedGameForce(std::string basic_string);    
+
+	bool setButtonColorR36Ultra(const std::string& basic_string);
+
+	bool setPowerLedR36(const std::string& basic_string);
 
     /* OS Info */
     std::vector<std::string> getAvailableCpuGovernors();
@@ -351,6 +364,9 @@ public:
 	void setLEDBrightness(int value);
 
 	bool isLEDMonochrome();
+
+	// LED Mode
+	void setLEDMode(const std::string& mode);
 
 	std::vector<std::string> getWifiNetworks(bool scan = false);
 

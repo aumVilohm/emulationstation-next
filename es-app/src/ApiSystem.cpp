@@ -187,8 +187,25 @@ bool ApiSystem::setOverclock(std::string mode)
 	return executeScript("batocera-overclock set " + mode);
 }
 
+#ifdef BATOCERA
+bool ApiSystem::areCpuMitigationsEnabled()
+{
+	auto result = executeScript("batocera-mitigations status", nullptr);
+
+	if (result.second != 0)
+		return true;
+
+	return Utils::String::trim(result.first) != "0";
+}
+
+bool ApiSystem::setCpuMitigationsEnabled(bool enabled)
+{
+	return executeScript(std::string("batocera-mitigations ") + (enabled ? "on" : "off"));
+}
+#endif
+
 // BusyComponent* ui
-std::pair<std::string, int> ApiSystem::updateSystem(const std::function<void(const std::string)>& func)
+std::pair<std::string, int> ApiSystem::updateSystem(const std::function<void(const std::string)>& func, bool fromlocalmedia)
 {
 	LOG(LogDebug) << "ApiSystem::updateSystem";
 
@@ -323,6 +340,85 @@ bool ApiSystem::ping()
     }
 
     return true;
+}
+
+bool ApiSystem::torrentIsReadyForUpdate() {
+  LOG(LogDebug) << "ApiSystem::torrentIsReadyForUpdate";
+
+  FILE *pipe = popen("batocera-upgrade-torrent --is-file-ready-to-update", "r");
+  if (pipe == NULL)
+    return false;
+
+  int res = WEXITSTATUS(pclose(pipe));
+  if (res == 0) 
+    {
+      LOG(LogInfo) << "Can update via torrent";
+      return true;
+    }
+
+  LOG(LogInfo) << "Cannot update via torrent";
+  return false;
+}
+
+std::string ApiSystem::torrentStatus() {
+  LOG(LogDebug) << "ApiSystem::torrentStatus";
+
+  std::vector<std::string> results = executeEnumerationScript("batocera-upgrade-torrent --status");
+  if (results.empty())
+    return "UNKNOWN";
+
+  return results[0];
+}
+
+std::pair<std::string, int> ApiSystem::torrentUpdateSystem(const std::function<void(const std::string)>& func)
+{
+	LOG(LogDebug) << "ApiSystem::torrentUpdateSystem";
+
+	std::string updatecommand = "batocera-upgrade-torrent --upgrade";
+
+	FILE *pipe = popen(updatecommand.c_str(), "r");
+	if (pipe == nullptr)
+		return std::pair<std::string, int>(std::string("Cannot call update command"), -1);
+	
+	char line[1024] = "";
+	FILE *flog = fopen(Utils::FileSystem::combine(Paths::getLogPath(), "batocera-upgrade-torrent.log").c_str(), "w");
+	while (fgets(line, 1024, pipe)) 
+	{
+		strtok(line, "\n");
+		if (flog != nullptr) 
+			fprintf(flog, "%s\n", line);
+
+		if (func != nullptr)
+			func(std::string(line));		
+	}
+
+	int exitCode = WEXITSTATUS(pclose(pipe));
+
+	if (flog != NULL)
+	{
+		fprintf(flog, "Exit code : %d\n", exitCode);
+		fclose(flog);
+	}
+
+	return std::pair<std::string, int>(std::string(line), exitCode);
+}
+
+bool ApiSystem::canLocalUpdate() {
+	LOG(LogDebug) << "ApiSystem::canMediaUpgrade";
+
+	FILE *pipe = popen("batocera-upgrade --check-media-upgrade", "r");
+	if (pipe == NULL)
+		return false;
+
+	int res = WEXITSTATUS(pclose(pipe));
+	if (res == 0) 
+	{
+		LOG(LogInfo) << "Can media upgrade";
+		return true;
+	}
+
+	LOG(LogInfo) << "Cannot media upgrade";
+	return false;
 }
 
 bool ApiSystem::canUpdate(std::vector<std::string>& output) 
@@ -482,14 +578,6 @@ bool ApiSystem::isWifiAPModeSupported()
 	LOG(LogDebug) << "ApiSystem::isWifiAPModeSupported";
 
 	return executeScript("wifictl has_ap_mode");
-}
-
-int ApiSystem::GetTotalRam()
-{
-	auto result = executeEnumerationScript("echo $(( $(awk '/MemTotal/ {print $2}' /proc/meminfo) / 1000 ))");
-	std::string data = Utils::String::join(result, "");
-	int ret = stoi(data);
-	return ret;
 }
 
 bool ApiSystem::enableBluetooth()
@@ -705,6 +793,33 @@ bool ApiSystem::setButtonColorGameForce(std::string selected)
 bool ApiSystem::setPowerLedGameForce(std::string selected)
 {
 	return executeScript("batocera-gameforce powerLed " + selected);
+}
+
+bool ApiSystem::setButtonColorR36Ultra(const std::string& selected)
+{
+	std::map<std::string, std::string> r36UltraModeMap = {
+		{"off", "0 0 0"},
+		{"red", "255 0 0"},
+		{"yellow", "255 255 0"},
+		{"green", "0 255 0"},
+		{"cyan", "0 255 255"},
+		{"blue", "0 0 255"},
+		{"purple", "255 0 255"},
+		{"white", "255 255 255"}
+	};
+	SystemConf::getInstance()->set("led.colour", r36UltraModeMap[selected]);
+	SystemConf::getInstance()->saveSystemConf();
+	return true;
+}
+
+bool ApiSystem::setPowerLedR36(const std::string& selected)
+{
+	if(selected == "off") {
+		Utils::FileSystem::writeAllText("/sys/class/leds/blue:power/brightness", "0");
+		return true;
+	}
+	Utils::FileSystem::writeAllText("/sys/class/leds/blue:power/brightness", "1");
+	return true;
 }
 
 bool ApiSystem::forgetBluetoothControllers() 
@@ -1436,6 +1551,22 @@ bool ApiSystem::getLED(int& red, int& green, int& blue)
 			break;
 		}
 
+		if (entry.find("go_s:rgb:joystick_rings") != std::string::npos)
+		{
+			LED_COLOUR_NAME = "legiongos";
+			mSystemLedType = LED_TYPE_UNIFIED;
+			LOG(LogInfo) << "ApiSystem::getLED > Found Lenovo Legion Go S LED at " << entry;
+			break;
+		}
+
+		if (entry.find("go:rgb:joystick_rings") != std::string::npos)
+		{
+			LED_COLOUR_NAME = "legiongo";
+			mSystemLedType = LED_TYPE_UNIFIED;
+			LOG(LogInfo) << "ApiSystem::getLED > Found Lenovo Legion Go/Go 2 LED at " << entry;
+			break;
+		}
+
 		if (entry.find("multicolor") != std::string::npos || 
 			entry.find(":rgb:joystick_rings") != std::string::npos || 
 			entry.find("rgb:l1") != std::string::npos)
@@ -1493,7 +1624,7 @@ bool ApiSystem::getLED(int& red, int& green, int& blue)
 			executeScript("batocera-led-handheld block_color_changes");
 			return true;
 		}
-		else if (LED_COLOUR_NAME == "cubexx" || LED_COLOUR_NAME == "rg_vita_pro") 
+		else if (LED_COLOUR_NAME == "cubexx" || LED_COLOUR_NAME == "rg_vita_pro" || LED_COLOUR_NAME == "legiongos" || LED_COLOUR_NAME == "legiongo") 
 		{
 			getLEDColours(red, green, blue);
 			executeScript("batocera-led-handheld block_color_changes");
@@ -1505,34 +1636,17 @@ bool ApiSystem::getLED(int& red, int& green, int& blue)
 			std::stringstream ss(colourValue);
 			std::string token;
 
-			if (LED_COLOUR_NAME.find("rgb:l") != std::string::npos) 
-			{
-				// Extract blue value
-				std::getline(ss, token, ' ');
-				blue = std::stoi(token);
+			// Extract red value
+			std::getline(ss, token, ' ');
+			red = std::stoi(token);
 
-				// Extract green value
-				std::getline(ss, token, ' ');
-				green = std::stoi(token);
+			// Extract green value
+			std::getline(ss, token, ' ');
+			green = std::stoi(token);
 
-				// Extract red value
-				std::getline(ss, token);
-				red = std::stoi(token);
-			} 
-			else 
-			{
-				// Extract red value
-				std::getline(ss, token, ' ');
-				red = std::stoi(token);
-
-				// Extract green value
-				std::getline(ss, token, ' ');
-				green = std::stoi(token);
-
-				// Extract blue value
-				std::getline(ss, token);
-				blue = std::stoi(token);
-			}
+			// Extract blue value
+			std::getline(ss, token);
+			blue = std::stoi(token);
 
 			executeScript("batocera-led-handheld block_color_changes"); // temporarily prevent changes from external daemon
 			LOG(LogInfo) << "ApiSystem::getLED > LED colours are:" << red << " " << green << " " << blue;
@@ -1583,6 +1697,16 @@ void ApiSystem::setLEDColours(int red, int green, int blue)
 	if (mSystemLedType == LED_TYPE_NONE)
 		return;
 
+	// We allow this check to be bypassed ONLY if we are turning the LEDs OFF (red=0, green=0, blue=0).
+	if (red != 0 || green != 0 || blue != 0)
+	{
+		std::string currentMode = SystemConf::getInstance()->get("led.mode");
+		if (currentMode == "rainbow" || currentMode == "chroma" || currentMode == "pulse")
+		{
+			return; 
+		}
+	}
+
     // Ensure RGB values are within valid range
 	if (red < 0) red = 0;
     if (red > 255) red = 255;
@@ -1595,7 +1719,7 @@ void ApiSystem::setLEDColours(int red, int green, int blue)
 	{
 		if (LED_COLOUR_NAME.empty() || LED_COLOUR_NAME == "notfound") return;
 
-		if (LED_COLOUR_NAME == "cubexx" || LED_COLOUR_NAME == "rg_vita_pro") {
+		if (LED_COLOUR_NAME == "cubexx" || LED_COLOUR_NAME == "rg_vita_pro" || LED_COLOUR_NAME == "legiongos" || LED_COLOUR_NAME == "legiongo") {
 			executeScript("batocera-led-handheld set_color_force_dec " + 
                           std::to_string(red) + " " + 
                           std::to_string(green) + " " + 
@@ -1613,20 +1737,19 @@ void ApiSystem::setLEDColours(int red, int green, int blue)
 			}
 		}
 		else if (LED_COLOUR_NAME.find("rgb:l") != std::string::npos) {
-			std::string content = std::to_string(blue) + " " + std::to_string(green) + " " + std::to_string(red);
-			for (int i = 1; i <= 7; i++) {
-				std::string leftPath = "/sys/class/leds/rgb:l" + std::to_string(i) + "/multi_intensity";
-				std::string rightPath = "/sys/class/leds/rgb:r" + std::to_string(i) + "/multi_intensity";
-				
-				// Only write if the specific LED index exists on the hardware
-				if (Utils::FileSystem::exists(leftPath)) {
-					Utils::FileSystem::writeAllText(leftPath, content);
-				}
-				if (Utils::FileSystem::exists(rightPath)) {
-					Utils::FileSystem::writeAllText(rightPath, content);
+			std::string content = std::to_string(red) + " " + std::to_string(green) + " " + std::to_string(blue);
+			auto allLeds = Utils::FileSystem::getDirContent("/sys/class/leds");
+			for (const auto& ledPath : allLeds) {
+				if (ledPath.find("/rgb:l") != std::string::npos || 
+					ledPath.find("/rgb:r") != std::string::npos) {
+					std::string intensityPath = ledPath + "/multi_intensity";
+					if (Utils::FileSystem::exists(intensityPath)) {
+						Utils::FileSystem::writeAllText(intensityPath, content);
+					}
 				}
 			}
-		} else {
+		}
+		else {
 			std::string content = std::to_string(red) + " " + std::to_string(green) + " " + std::to_string(blue);
 			Utils::FileSystem::writeAllText(LED_COLOUR_NAME, content);
 		}
@@ -1654,6 +1777,19 @@ bool ApiSystem::getLEDBrightness(int& value)
 #if WIN32
     return false;
 #endif
+
+    // Handle software-controlled brightness platforms directly from configuration
+    if (LED_COLOUR_NAME == "cubexx" || LED_COLOUR_NAME == "rg_vita_pro" || LED_COLOUR_NAME == "legiongos" || LED_COLOUR_NAME == "legiongo")
+    {
+        mSystemLedType = LED_TYPE_UNIFIED;
+        std::string valStr = SystemConf::getInstance()->get("led.brightness");
+        if (valStr.empty()) {
+            value = 100; // Default to 100% if not yet configured
+        } else {
+            value = Utils::String::toInteger(valStr);
+        }
+        return true;
+    }
 
     if (LED_BRIGHTNESS_VALUE.empty() || LED_MAX_BRIGHTNESS_VALUE.empty())
     {
@@ -1721,7 +1857,7 @@ void ApiSystem::setLEDBrightness(int value)
     if (value < 0) value = 0;
     if (value > 100) value = 100;
 
-	if (LED_COLOUR_NAME == "cubexx" || LED_COLOUR_NAME == "rg_vita_pro") {
+	if (LED_COLOUR_NAME == "cubexx" || LED_COLOUR_NAME == "rg_vita_pro" || LED_COLOUR_NAME == "legiongos" || LED_COLOUR_NAME == "legiongo") {
 		SystemConf::getInstance()->set("led.brightness", std::to_string(value));
 		SystemConf::getInstance()->saveSystemConf();
 		int r, g, b;
@@ -1815,6 +1951,31 @@ bool ApiSystem::isLEDEnabled()
 #endif
 }
 
+void ApiSystem::setLEDMode(const std::string& mode)
+{
+#if WIN32
+    return;
+#else
+    SystemConf::getInstance()->set("led.mode", mode);
+    SystemConf::getInstance()->saveSystemConf();
+
+    executeScript("batocera-led-handheld unblock_color_changes");
+
+    if (mode == "rainbow") {
+        executeScript("batocera-led-handheld rainbow");
+    } else if (mode == "chroma") {
+        executeScript("batocera-led-handheld chroma");
+    } else if (mode == "pulse") {
+        executeScript("batocera-led-handheld pulse");
+    } else {
+        // Fall back to the user's customized static colors
+        int r, g, b;
+        getLEDColours(r, g, b);
+        setLEDColours(r, g, b);
+    }
+#endif
+}
+
 void ApiSystem::setLEDEnabled(bool enabled)
 {
 #if WIN32
@@ -1828,15 +1989,20 @@ void ApiSystem::setLEDEnabled(bool enabled)
 	}
 	else
 	{
-		std::string lastColorStr = SystemConf::getInstance()->get("led.colour");
-		if (lastColorStr.empty())
-			lastColorStr = "255 0 165";
+		std::string mode = SystemConf::getInstance()->get("led.mode");
+		if (mode == "rainbow" || mode == "chroma" || mode == "pulse") {
+			setLEDMode(mode);
+		} else {
+			std::string lastColorStr = SystemConf::getInstance()->get("led.colour");
+			if (lastColorStr.empty())
+				lastColorStr = "255 0 165";
 
-		std::stringstream ss(lastColorStr);
-		int r, g, b;
-		ss >> r >> g >> b;
+			std::stringstream ss(lastColorStr);
+			int r, g, b;
+			ss >> r >> g >> b;
 
-		setLEDColours(r, g, b);
+			setLEDColours(r, g, b);
+		}
 	}
 
 	SystemConf::getInstance()->saveSystemConf();
@@ -2026,6 +2192,9 @@ bool ApiSystem::isScriptingSupported(ScriptId script)
 		break;
 	case ApiSystem::UPGRADE:
 		executables.push_back("rocknix-update");
+		break;
+	case ApiSystem::UPGRADEVIATORRENT:
+		executables.push_back("batocera-upgrade-torrent");
 		break;
 	case ApiSystem::SUSPEND:
 		return (Utils::FileSystem::exists("/usr/sbin/pm-suspend") && Utils::FileSystem::exists("/usr/bin/pm-is-supported") && executeScript("/usr/bin/pm-is-supported --suspend"));

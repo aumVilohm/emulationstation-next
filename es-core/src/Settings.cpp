@@ -9,7 +9,6 @@
 #include <vector>
 #include "utils/StringUtil.h"
 #include "Paths.h"
-#include "../es-app/src/ApiSystem.h"
 
 Settings* Settings::sInstance = NULL;
 static std::string mEmptyString = "";
@@ -33,7 +32,8 @@ IMPLEMENT_STATIC_BOOL_SETTING(IgnoreLeadingArticles, true)
 IMPLEMENT_STATIC_BOOL_SETTING(ShowVideoPreviews, true)
 IMPLEMENT_STATIC_BOOL_SETTING(ShowFoldersFirst, true)
 IMPLEMENT_STATIC_BOOL_SETTING(ScrollLoadMedias, false)
-IMPLEMENT_STATIC_INT_SETTING(ScreenSaverTime, 3 * 60 * 1000)
+IMPLEMENT_STATIC_INT_SETTING(ScreenSaverTime, 5 * 60 * 1000)
+IMPLEMENT_STATIC_INT_SETTING(FpsLimit, 0)
 
 #if WIN32
 IMPLEMENT_STATIC_BOOL_SETTING(ShowNetworkIndicator, false)
@@ -63,6 +63,7 @@ void Settings::updateCachedSetting(const std::string& name)
 	UPDATE_STATIC_BOOL_SETTING(ShowVideoPreviews)
 	UPDATE_STATIC_BOOL_SETTING(ShowFoldersFirst)
 	UPDATE_STATIC_INT_SETTING(ScreenSaverTime)
+	UPDATE_STATIC_INT_SETTING(FpsLimit)
 
 	if (name == "HiddenSystems")
 	{
@@ -219,15 +220,21 @@ void Settings::setDefaults()
 	mIntMap["RecentlyScrappedFilter"] = 3;
 	
 	mIntMap["ScreenSaverTime"] = Settings::_ScreenSaverTime;
+	mIntMap["FpsLimit"] = 0;
 	mIntMap["ScraperResizeWidth"] = 640;
 	mIntMap["ScraperResizeHeight"] = 0;
 
-	auto totalRam = ApiSystem::getInstance()->GetTotalRam();
-	if ( totalRam <= 1025 ) {
+	// Dynamically scale MaxVRAM based on total system RAM
+	// getTotalSystemMemory returns bytes, divide by 1024^2 for MB
+	unsigned long long totalRamBytes = Utils::Platform::getTotalSystemMemory();
+	int totalRamMB = static_cast<int>(totalRamBytes / (1024ULL * 1024ULL));
+
+	// Fallback to 128MB VRAM if RAM detection fails (returns 0)
+	if (totalRamMB == 0 || totalRamMB <= 1024) {
 		mIntMap["MaxVRAM"] = 128;
-	} else if ( totalRam <= 2049 && totalRam > 1025) {
+	} else if (totalRamMB <= 2048) {
 		mIntMap["MaxVRAM"] = 256;
-	} else if ( totalRam <= 4097 && totalRam > 2049) {
+	} else if (totalRamMB <= 4096) {
 		mIntMap["MaxVRAM"] = 384;
 	} else {
 		mIntMap["MaxVRAM"] = 512;

@@ -225,7 +225,7 @@ int Win32ApiSystem::executeCMD(const char* lpCommandLine, std::string& output, c
 			//spawn the child process
 			std::wstring commandLineW = Utils::String::convertToWideString(lpCommandLine);
 			std::wstring directory = lpCurrentDirectory == NULL ? L"" : Utils::String::convertToWideString(lpCurrentDirectory);
-			if (CreateProcessW(NULL, (LPWSTR)commandLineW.c_str(), NULL, NULL, TRUE, CREATE_NEW_CONSOLE, NULL, lpCurrentDirectory == NULL ? NULL : (LPWSTR)directory.c_str(), &si, &pi))
+			if (CreateProcessW(NULL, (LPWSTR)commandLineW.c_str(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, lpCurrentDirectory == NULL ? NULL : (LPWSTR)directory.c_str(), &si, &pi))
 			{
 				if (m_hJob != nullptr)
 					AssignProcessToJobObject(m_hJob, pi.hProcess);
@@ -753,7 +753,7 @@ void Win32ApiSystem::installEmulationStationZip(const std::string& zipFile)
 	Utils::FileSystem::deleteDirectoryFiles(path);
 }
 
-std::pair<std::string, int> Win32ApiSystem::updateSystem(const std::function<void(const std::string)>& func)
+std::pair<std::string, int> Win32ApiSystem::updateSystem(const std::function<void(const std::string)>& func, bool fromlocalmedia)
 {
 	std::string esUpdateScript = getScriptPath("es-update");
 	if (!esUpdateScript.empty())
